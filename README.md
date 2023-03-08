@@ -1,6 +1,6 @@
 # Determining the optimal stacking level in Bangladesh using Cost Benefit Analysis
  
- - This project was done as part of an initiative to drive profitability and maintain a healthy customer experience for the largest food delivery business Foodpanda | Delivery Hero in Bangladesh.
+ - This project was done as part of an initiative to drive profitability and maintain a healthy customer experience at an optimal cost efficiency for the largest food delivery business Foodpanda | Delivery Hero in Bangladesh.
  
 #### Breakdown: The project is divided into 3 stages -->
  - Data ETL (Check SQL Query Doc)
