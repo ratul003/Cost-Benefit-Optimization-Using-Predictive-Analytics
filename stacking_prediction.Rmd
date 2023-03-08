@@ -1,0 +1,315 @@
+---
+output:
+  html_document:
+    df_print: paged
+  always_allow_html: yes
+---
+
+# Loading packages
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+#setwd("~/R")
+library(knitr)
+library(ggplot2)
+library(Hmisc)
+library(kableExtra)
+library(dplyr)
+#library(gmodels)
+library(emmeans)
+#library(funModeling)
+library(funModeling)
+library(skimr)
+library(janitor)
+library(corrr)
+library(corrplot)
+library(tidyverse)
+library(caret)
+library(PerformanceAnalytics)
+library(AICcmodavg)
+library(visreg)
+library(performance)
+
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+data<- read.csv("stacking.csv", header = TRUE, sep =",")
+data<-data.frame(data)
+data$week = as.numeric(data$week)
+data$hurrier_orders = as.numeric(data$hurrier_orders)
+data$hurrier_opd = as.numeric(data$hurrier_opd)
+data$unique_active_rider = as.numeric(data$unique_active_rider)
+data$reordered = as.numeric(data$reordered)
+data$churn = as.numeric(data$churn)
+data<-cbind(data,per_rider_weekly_income_eur = data$total_rider_earning_eur/data$unique_active_rider)
+#View(data)
+rmarkdown::paged_table(head(data))
+#summary(data)
+
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+data_x<-data.frame(data$hurrier_orders,data$hurrier_opd,data$unique_active_rider,data$dt,data$delayed_order_perc,data$rider_late,data$vendor_late,data$rider_fill_rate_perc,data$utr_overall,data$stacked_deliveries_perc,data$weighted_surge_time_perc,data$weighted_shrinkage_time_perc,data$ao_nps,data$csat_perc,data$seamless_order_perc,data$auto_comp_cpo,data$comp_cpo,data$refund_comp_cpo,data$total_rider_earning_eur,data$rider_cpo,data$rider_cph,data$reordered,data$reordered_7day_perc,data$churn)
+
+```
+
+## Normalizing the dataframe
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+preProcess(data)
+chart.Correlation(data[,c(3,5,6,7,8,9,10,11,13,33,35,40)], histogram=TRUE, pch=19)
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+
+flattenCorrMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+    )
+}
+mdata_x<-(as.matrix(data_x))
+
+mdata_x <- rcorr(as.matrix(data_x))
+#mdata_X
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+y<-flattenCorrMatrix(mdata_x$r, mdata_x$P)
+#print(y)
+rmarkdown::paged_table((y))
+```
+
+#r : The table of correlation coefficients. #p : Table of p-values corresponding to the significance levels of the correlations. #sym : A representation of the correlation matrix in which coefficients are replaced by symbols according to the strength of the dependence.
+
+# Plots
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+
+g0<-data %>%
+     ggplot(aes(x = stacked_deliveries_perc, y =dt
+                , colour=week)) +
+     geom_point(size=2) +
+    geom_smooth(se=F, colour="grey")
+plot(g0)
+
+
+g1<- data %>%
+     ggplot(aes(x = stacked_deliveries_perc, y = comp_cpo, colour=week)) +
+     geom_point(size=2) +
+    geom_smooth(se=F, colour="grey")
+plot(g1)
+
+g2<-data %>%
+     ggplot(aes(x = stacked_deliveries_perc, y = refund_comp_cpo, colour=week)) +
+     geom_point(size=2) +
+    geom_smooth(se=F, colour="grey")
+plot(g2)
+g3<-data %>%
+     ggplot(aes(x = stacked_deliveries_perc*100, y = rider_cpo
+                , colour=week)) +
+     geom_point(size=2) +
+    geom_smooth(se=F, colour="grey")
+plot(g3)
+
+g4<- data %>% ggplot(aes(x = stacked_deliveries_perc, y = auto_comp_cpo, colour=week)) +geom_point(size=2) + geom_smooth(se=F, colour="grey")
+plot(g4)
+
+```
+
+#### Modeling
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+options(scipen=999)
+m1<- lm(dt ~ log(delayed_order_perc) + log(rider_fill_rate_perc) + utr_overall + daily_working_hours + p_d_distance_km + log(stacked_deliveries_perc) + log(single_stacked_deliveries_perc) + log(double_stacked_deliveries_perc) +
+log(triple_stacked_deliveries_perc) + churn + log(weighted_surge_time_perc) + log(weighted_shrinkage_time_perc), data = data)
+summary(m1)
+#plot(m1)
+#visreg(m1)
+ggplot(data,aes(x= stacked_deliveries_perc, y= dt)) + geom_point() + geom_smooth(method= "lm")
+
+
+```
+
+### Model Prediction - (DELIVERY TIME)
+
+#### Taking the following assumption from historical data as the status_quo:
+
+-   order_per_rider_day = 4.5
+-   unique_active_rider = 12000
+-   p_d\_distance_km = 1.4
+-   dt = 27
+-   delayed_order_perc = 35%
+-   delayed_above_10_mins_perc = 12%
+-   rider_late = -5.5
+-   vendor_late = 4.2
+-   rider_fill_rate_perc = 87%
+-   utr_overall = 1.5
+-   daily_working_hours = 42000
+-   stacked_deliveries_perc = 24%
+-   single_stacked_deliveries_perc = 20% (total_stack : single_stack = 1.2:1)
+-   double_stacked_deliveries_perc = 4% (single_stack : double_stack = 5:1)
+-   triple_stacked_deliveries_perc = 0.8% (double_stack : triple_stack = 5:1)
+-   weighted_shrinkage_time_perc = 5%
+-   weighted_surge_time_perc = 20%
+-   ao_nps = -4.0
+-   csat_perc = 55%
+-   reordered_perc = 78%
+-   reordered_7day_perc = 55%
+-   reordered_30_day_perc = 70%
+-   churn = 1800
+-   total_rider_earning_eur = 162786994.6
+
+```{r, echo=TRUE, warning = FALSE, message = FALSE}
+pred_dt<-as.data.frame(cbind(week= data$week,actual_dt= data$dt, predict_dt= predict(m1)))
+rmarkdown::paged_table(pred_dt)
+
+## When things are normal and stacking ~24%:
+dt_pred1= predict(m1,data.frame(delayed_order_perc = 0.35,rider_fill_rate_perc = 0.87,utr_overall= 1.5,p_d_distance_km=1.4, daily_working_hours =42000, stacked_deliveries_perc = 0.24, single_stacked_deliveries_perc =0.20, double_stacked_deliveries_perc =0.04, triple_stacked_deliveries_perc=0.008, churn=1800, weighted_surge_time_perc=0.30, weighted_shrinkage_time_perc =0.10), interval ="confidence")
+print(dt_pred1)
+
+# When stacking is increased by 5%% 
+dt_pred2= predict(m1,data.frame(delayed_order_perc = 0.35,rider_fill_rate_perc = 0.87,utr_overall= 1.5,p_d_distance_km=1.4, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.05, single_stacked_deliveries_perc = 0.20+0.04, double_stacked_deliveries_perc =0.04+0.008 , triple_stacked_deliveries_perc=0.008+0.0016, churn=1800, weighted_surge_time_perc=0.30, weighted_shrinkage_time_perc =0.10), interval ="confidence")
+print(dt_pred2)
+
+# When stacking is increased by 10% 
+dt_pred3= predict(m1,data.frame(delayed_order_perc = 0.35,rider_fill_rate_perc = 0.87,utr_overall= 1.5,p_d_distance_km=1.4, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.10, single_stacked_deliveries_perc = 0.20+0.08, double_stacked_deliveries_perc =0.04+0.016 , triple_stacked_deliveries_perc=0.008+0.0032, churn=1800, weighted_surge_time_perc=0.30, weighted_shrinkage_time_perc =0.10), interval ="confidence")
+print(dt_pred3)
+
+# When stacking is increased by 15% 
+dt_pred4= predict(m1,data.frame(delayed_order_perc = 0.35,rider_fill_rate_perc = 0.87,utr_overall= 1.5,p_d_distance_km=1.4, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.15, single_stacked_deliveries_perc = 0.20+0.125, double_stacked_deliveries_perc =0.04+0.025 , triple_stacked_deliveries_perc=0.008+0.005, churn=1800, weighted_surge_time_perc=0.30, weighted_shrinkage_time_perc =0.10), interval ="confidence")
+print(dt_pred4)
+
+# When stacking is decreased by 5% 
+dt_pred5= predict(m1,data.frame(delayed_order_perc = 0.35,rider_fill_rate_perc = 0.87,utr_overall= 1.5,p_d_distance_km=1.4, daily_working_hours =42000, stacked_deliveries_perc = 0.24-0.05, single_stacked_deliveries_perc = 0.20-0.04, double_stacked_deliveries_perc =0.04-0.008 , triple_stacked_deliveries_perc=0.008-0.0016, churn=1800, weighted_surge_time_perc=0.30, weighted_shrinkage_time_perc =0.10), interval ="confidence")
+print(dt_pred5)
+
+```
+
+### Model Prediction - (RIDER CPO)
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+m2<- lm(rider_cpo ~ order_per_rider_per_day + unique_active_rider + utr_overall + per_rider_weekly_income_eur + daily_working_hours + p_d_distance_km + log(stacked_deliveries_perc) + log(single_stacked_deliveries_perc) + log(double_stacked_deliveries_perc) +
+log(triple_stacked_deliveries_perc) + churn, data = data)
+summary(m2)
+
+#predict(m2, newdata= st)
+#plot(m2)
+#visreg(m2)
+
+ggplot(data,aes(x= stacked_deliveries_perc, y= rider_cpo)) + geom_point() + geom_smooth(method= "lm")
+
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+pred_rider_cpo<-as.data.frame(cbind(week= data$week,actual_rider_cpo= data$rider_cpo, pred_rider_cpo= predict(m2)))
+rmarkdown::paged_table(pred_rider_cpo)
+
+## When things are normal and stacking ~24%:
+pred_rider_cpo1= predict(m2,data.frame(order_per_rider_per_day = 4.5, per_rider_weekly_income_eur = 14.1, unique_active_rider= 12000,utr_overall= 1.5,p_d_distance_km=1.4, daily_working_hours =42000, stacked_deliveries_perc = 0.24, single_stacked_deliveries_perc =0.20, double_stacked_deliveries_perc =0.04, triple_stacked_deliveries_perc=0.008, churn=1800), interval ="confidence")
+print(pred_rider_cpo1)
+
+# When stacking is increased by 5%% 
+pred_rider_cpo2= predict(m2,data.frame(order_per_rider_per_day = 4.5, utr_overall= 1.5, per_rider_weekly_income_eur = 14.1, unique_active_rider=12000, p_d_distance_km=1.4, total_rider_earning_eur= 162786994.6, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.05, single_stacked_deliveries_perc = 0.20+0.04, double_stacked_deliveries_perc =0.04+0.008 , triple_stacked_deliveries_perc=0.008+0.0016, churn=1800), interval ="confidence")
+print(pred_rider_cpo2)
+
+# When stacking is increased by 10% 
+pred_rider_cpo3= predict(m2,data.frame(order_per_rider_per_day = 4.5, utr_overall= 1.5, unique_active_rider= 12000, per_rider_weekly_income_eur = 14.1, p_d_distance_km=1.4, total_rider_earning_eur= 162786994.6, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.10, single_stacked_deliveries_perc = 0.20+0.08, double_stacked_deliveries_perc =0.04+0.016 , triple_stacked_deliveries_perc=0.008+0.0032, churn=1800), interval ="confidence")
+print(pred_rider_cpo3)
+
+# When stacking is increased by 15% 
+pred_rider_cpo4= predict(m2,data.frame(order_per_rider_per_day = 4.5,utr_overall= 1.5, unique_active_rider= 12000, per_rider_weekly_income_eur = 14.1,p_d_distance_km=1.4, daily_working_hours =42000,total_rider_earning_eur= 162786994.6, stacked_deliveries_perc = 0.24+0.15, single_stacked_deliveries_perc = 0.20+0.125, double_stacked_deliveries_perc =0.04+0.025 , triple_stacked_deliveries_perc=0.008+0.005, churn=1800), interval ="confidence")
+print(pred_rider_cpo4)
+
+# When stacking is decreased by 5% 
+pred_rider_cpo5= predict(m2,data.frame(order_per_rider_per_day = 4.5,utr_overall= 1.5,p_d_distance_km=1.4, unique_active_rider=12000, per_rider_weekly_income_eur = 14.1, total_rider_earning_eur= 162786994.6, daily_working_hours =42000, stacked_deliveries_perc = 0.24-0.05, single_stacked_deliveries_perc = 0.20-0.04, double_stacked_deliveries_perc =0.04-0.008 , triple_stacked_deliveries_perc=0.008-0.0016, churn=1800), interval ="confidence")
+print(pred_rider_cpo5)
+
+rbind(pred_rider_cpo1,pred_rider_cpo2,pred_rider_cpo3,pred_rider_cpo4,pred_rider_cpo5)
+
+```
+
+### Model Prediction - (AUTO COMPENSATION CPO)
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+
+m3<- lm(auto_comp_cpo ~ dt + log(delayed_order_perc) + daily_working_hours  + log(stacked_deliveries_perc) + log(single_stacked_deliveries_perc) + log(double_stacked_deliveries_perc) +
+log(triple_stacked_deliveries_perc) + log(reordered_perc+0.00001) + log(reordered_7day_perc+0.00001) + log(reordered_30_day_perc+0.00001) + log(csat_perc) + ao_nps, data = data)
+summary(m3)
+plot(m3)
+#visreg(m3)
+ggplot(data,aes(x= stacked_deliveries_perc, y= auto_comp_cpo)) + geom_point() + geom_smooth(method= "lm")
+
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+
+pred_auto_comp_cpo<-as.data.frame(cbind(week= data$week,actual_auto_comp_cpo= data$auto_comp_cpo, pred_auto_comp_cpo= predict(m3)))
+rmarkdown::paged_table(pred_auto_comp_cpo)
+
+## When things are normal and stacking ~24%:
+pred_auto_comp_cpo1= predict(m3,data.frame(dt=27,delayed_order_perc =0.35, daily_working_hours =42000, stacked_deliveries_perc = 0.24, single_stacked_deliveries_perc =0.20, double_stacked_deliveries_perc =0.04, triple_stacked_deliveries_perc=0.008, reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70, csat_perc=0.55 ,ao_nps= -4.0), interval ="confidence")
+print(pred_auto_comp_cpo1)
+
+# When stacking is increased by 5%% 
+pred_auto_comp_cpo2= predict(m3,data.frame(dt=27,delayed_order_perc= 0.35, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.05, single_stacked_deliveries_perc = 0.20+0.04, double_stacked_deliveries_perc =0.04+0.008 , triple_stacked_deliveries_perc=0.008+0.0016, reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70, csat_perc=0.55 ,ao_nps= -4.0), interval ="confidence")
+print(pred_auto_comp_cpo2)
+
+# When stacking is increased by 10% 
+pred_auto_comp_cpo3= predict(m3,data.frame(dt=27,delayed_order_perc= 0.35, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.10, single_stacked_deliveries_perc = 0.20+0.08, double_stacked_deliveries_perc =0.04+0.016 , triple_stacked_deliveries_perc=0.008+0.0032,reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70, csat_perc=0.55 ,ao_nps= -4.0 ), interval ="confidence")
+print(pred_auto_comp_cpo3)
+
+# When stacking is increased by 15% 
+pred_auto_comp_cpo4= predict(m3,data.frame(dt=27,delayed_order_perc= 0.35, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.15, single_stacked_deliveries_perc = 0.20+0.125, double_stacked_deliveries_perc =0.04+0.025 , triple_stacked_deliveries_perc=0.008+0.005,reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70, csat_perc=0.55 ,ao_nps= -4.0), interval ="confidence")
+print(pred_auto_comp_cpo4)
+
+# When stacking is decreased by 5% 
+pred_auto_comp_cpo5= predict(m3,data.frame(dt=27,delayed_order_perc= 0.35,daily_working_hours =42000, stacked_deliveries_perc = 0.24-0.05, single_stacked_deliveries_perc = 0.20-0.04, double_stacked_deliveries_perc =0.04-0.008 , triple_stacked_deliveries_perc=0.008-0.0016,reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70, csat_perc=0.55 ,ao_nps= -4.0 ), interval ="confidence")
+print(pred_rider_cpo5)
+
+
+rbind(pred_auto_comp_cpo1,pred_auto_comp_cpo2,pred_auto_comp_cpo3,pred_auto_comp_cpo4,pred_auto_comp_cpo5)
+
+
+```
+
+### Model Prediction - (REFUND COMPENSATION CPO)
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+m4<- lm(refund_comp_cpo ~ dt + log(delayed_order_perc) + utr_overall + daily_working_hours + log(stacked_deliveries_perc) + log(single_stacked_deliveries_perc) + log(double_stacked_deliveries_perc) +
+log(triple_stacked_deliveries_perc) + log(reordered_perc+0.00001) + log(reordered_7day_perc+0.00001) + log(reordered_30_day_perc+0.00001), data = data)
+summary(m4)
+plot(m4)
+#visreg(m4)
+ggplot(data,aes(x=stacked_deliveries_perc, y= refund_comp_cpo)) + geom_point() + geom_smooth(method= "lm")
+```
+
+```{r,echo=TRUE, warning=FALSE, message=FALSE}
+pred_refund_comp_cpo<-as.data.frame(cbind(week= data$week,actual_refund_comp_cpo= data$refund_comp_cpo, pred_refund_comp_cpo= predict(m4)))
+rmarkdown::paged_table(pred_refund_comp_cpo)
+
+## When things are normal and stacking ~24%:
+pred_refund_comp_cpo1= predict(m4,data.frame(dt=27,delayed_order_perc =0.35, utr_overall= 1.5,daily_working_hours =42000, stacked_deliveries_perc = 0.24, single_stacked_deliveries_perc =0.20, double_stacked_deliveries_perc =0.04, triple_stacked_deliveries_perc=0.008, reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70), interval ="confidence")
+print(pred_refund_comp_cpo1)
+
+# When stacking is increased by 5%% 
+pred_refund_comp_cpo2= predict(m4,data.frame(dt=27,delayed_order_perc= 0.35,utr_overall= 1.5, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.05, single_stacked_deliveries_perc = 0.20+0.04, double_stacked_deliveries_perc =0.04+0.008 , triple_stacked_deliveries_perc=0.008+0.0016, reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70), interval ="confidence")
+print(pred_refund_comp_cpo2)
+
+# When stacking is increased by 10% 
+pred_refund_comp_cpo3= predict(m4,data.frame(dt=27,delayed_order_perc= 0.35,utr_overall= 1.5, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.10, single_stacked_deliveries_perc = 0.20+0.08, double_stacked_deliveries_perc =0.04+0.016 , triple_stacked_deliveries_perc=0.008+0.0032,reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70), interval ="confidence")
+print(pred_refund_comp_cpo3)
+
+# When stacking is increased by 15% 
+pred_refund_comp_cpo4= predict(m4,data.frame(dt=27,delayed_order_perc= 0.35,utr_overall= 1.5, daily_working_hours =42000, stacked_deliveries_perc = 0.24+0.15, single_stacked_deliveries_perc = 0.20+0.125, double_stacked_deliveries_perc =0.04+0.025 , triple_stacked_deliveries_perc=0.008+0.005,reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70), interval ="confidence")
+print(pred_refund_comp_cpo4)
+
+# When stacking is decreased by 5% 
+pred_refund_comp_cpo5= predict(m4,data.frame(dt=27,delayed_order_perc= 0.35,utr_overall= 1.5,daily_working_hours =42000, stacked_deliveries_perc = 0.24-0.05, single_stacked_deliveries_perc = 0.20-0.04, double_stacked_deliveries_perc =0.04-0.008 , triple_stacked_deliveries_perc=0.008-0.0016,reordered_perc=0.78, reordered_7day_perc = 0.55,reordered_30_day_perc=0.70), interval ="confidence")
+print(pred_refund_comp_cpo5)
+
+
+rbind(pred_refund_comp_cpo1,pred_refund_comp_cpo2,pred_refund_comp_cpo3,pred_refund_comp_cpo4,pred_refund_comp_cpo5)
+```
