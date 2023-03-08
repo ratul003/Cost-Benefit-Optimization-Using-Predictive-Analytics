@@ -8,7 +8,7 @@
  - Stakeholder Management and Driving the Proposal (Check Google Slides)
 
 ## What? 
-### Determining the optimal “The Algo Order Assignment” stacking levels using Cost-Benefit Analysis
+### Determining the optimal “ML Algo Order Assignment” stacking levels using Cost-Benefit Analysis
 
 ## Why?
 #### Drive Benefits → 
