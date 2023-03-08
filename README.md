@@ -37,7 +37,7 @@ Slides construct ranked in ORDER →
 4. PRE and WORST Performance metrics VISUALS during the stacking experiment for cost reduction
 
 Metrics include → 
-  ##### Cost :- Delivery Time, Delayed Orders, Customer Contact Rate, Compensation Cost Per Order, Refund Cost Per Order, Seamless Orders
+  ##### Cost :- Delivery Time, Delayed Orders%, Customer Contact Rate, Compensation Cost Per Order, Refund Cost Per Order, Seamless Orders%
   ##### Benefits :- Rider CPO, Rider Efficiancy Rate
 
 5. Overview of the Correlation Test, Confidence Interval Test & Model Predictions 
