@@ -1,0 +1,1186 @@
+### Weekly Country Logistics Major KPIs –
+
+### Extracting country wide weekly major business KPIs 
+
+WITH
+  pd_orders AS (
+  SELECT
+    bd_analytics.lg_zone_id,
+    pd_orders.global_entity_id,
+    pd_orders.uuid,
+  IF
+    (country_name IN ('Finland',
+        'Sweden'), 'Europe', shared_countries.region) AS region,
+    pd_orders.country_name,
+    shared_countries.country_code_iso AS country_iso,
+    shared_countries.currency_code_iso AS currency_code,
+    pd_orders.id,
+    pd_orders.vendor_code,
+    pd_orders.vendor_name,
+    pd_vendors_agg_business_types.business_type_apac,
+    CASE
+      WHEN pd_vendors_agg_business_types.business_type_apac IN ('restaurants', 'home_based_kitchens') THEN 'restaurants'
+      WHEN pd_vendors_agg_business_types.business_type_apac = 'kitchens' THEN 'kitchens'
+      WHEN pd_vendors_agg_business_types.business_type_apac = 'concepts' THEN 'concepts'
+      WHEN pd_vendors_agg_business_types.business_type_apac = 'dmart' THEN 'dmart'
+      WHEN pd_vendors_agg_business_types.business_type_apac = 'shops' THEN 'shops'
+  END
+    AS vertical_type,
+    pd_orders.pd_vendor_uuid,
+    pd_orders.pd_customer_id,
+    pd_orders.expedition_type,
+    pd_orders.code,
+    pd_orders.is_valid_order,
+    pd_orders.is_preorder,
+    pd_orders.is_gross_order,
+    pd_orders.is_failed_order,
+    grp_orders.uuid IS NOT NULL is_group_order,
+    IFNULL(LOWER(pd_orders.delivery_provider.type) LIKE '%own%', FALSE) AS is_own_delivery,
+    pd_orders.created_at_local,
+    DATE(pd_orders.created_at_local) date_local,
+    pd_orders.created_date_utc,
+    pd_orders.ordered_at_local,
+  FROM
+    `fulfillment-dwh-production.pandata_curated.pd_orders` pd_orders
+  LEFT JOIN
+    `fulfillment-dwh-production.pandata_curated.grp_orders` grp_orders
+  ON
+    grp_orders.global_entity_id = pd_orders.global_entity_id
+    AND grp_orders.code = pd_orders.code
+  LEFT JOIN
+    `fulfillment-dwh-production.pandata_curated.pd_vendors` pd_vendors
+  ON
+    pd_vendors.uuid = pd_orders.pd_vendor_uuid
+  LEFT JOIN
+    `fulfillment-dwh-production.pandata_curated.shared_countries` AS shared_countries
+  ON
+    shared_countries.global_entity_id = pd_orders.global_entity_id
+  LEFT JOIN
+    `foodpanda-bd-bigquery.pandata_bd_finance.bd_analytics` AS bd_analytics
+  ON
+    pd_orders.uuid = bd_analytics.uuid
+  LEFT JOIN
+    `fulfillment-dwh-production.pandata_report.regional_apac_pd_vendors_agg_business_types` pd_vendors_agg_business_types
+  ON
+    pd_vendors_agg_business_types.uuid = pd_vendors.uuid
+  WHERE
+    TRUE
+    AND pd_orders.created_date_local BETWEEN '2022-01-01'
+    AND '2022-12-31'
+    AND DATE(pd_orders.created_date_local) BETWEEN '2022-01-01'
+    AND '2022-12-31'
+    AND DATE(pd_orders.ordered_at_local) BETWEEN '2022-01-01'
+    AND '2022-12-31'
+    AND pd_orders.created_date_utc BETWEEN '2022-01-01'
+    AND '2022-12-31'
+    AND pd_orders.global_entity_id != 'FP_DE' ),
+  ticket_orders AS (
+  SELECT
+    DISTINCT currency_code_iso,
+    order_code
+  FROM
+    `fulfillment-dwh-production.pandata_curated.sf_cases` AS sf_tickets
+  WHERE
+    department = 'Customer Service'
+    AND DATE(created_at_utc) < current_date
+  UNION DISTINCT
+  SELECT
+    DISTINCT currency_code_iso,
+    order_code
+  FROM
+    `fulfillment-dwh-production.pandata_curated.gcc_pandacare_chats` AS pd_tickets
+  LEFT JOIN
+    `fulfillment-dwh-production.pandata_curated.shared_countries` AS pd_countries
+  ON
+    pd_tickets.global_entity_id = pd_countries.global_entity_id
+  WHERE
+    TRUE
+    AND created_date_utc < current_date ),
+  zone_events AS (
+  SELECT
+    lg_delivery_areas_events.global_entity_id,
+    lg_delivery_areas_events.lg_zone_id,
+    lg_delivery_areas_events.uuid,
+    lg_delivery_areas_events.lg_event_uuid,
+    lg_delivery_areas_events.action_type AS action,
+    lg_delivery_areas_events.title,
+    DATE(TIMESTAMP(lg_delivery_areas_events.start_at_utc), shared_countries.timezone) AS event_date_local,
+    DATETIME(TIMESTAMP(lg_delivery_areas_events.start_at_utc), shared_countries.timezone) AS start_at_local,
+    DATETIME(TIMESTAMP(lg_delivery_areas_events.end_at_utc), shared_countries.timezone) AS end_at_local,
+  FROM
+    `fulfillment-dwh-production.pandata_curated.lg_delivery_areas_events` AS lg_delivery_areas_events
+  LEFT JOIN
+    `fulfillment-dwh-production.pandata_curated.shared_countries` AS shared_countries
+  ON
+    shared_countries.global_entity_id = lg_delivery_areas_events.global_entity_id
+  WHERE
+    lg_delivery_areas_events.created_date_utc BETWEEN '2022-01-01'
+    AND '2022-12-31'
+    AND (lg_delivery_areas_events.action_type IN ('shrink',
+        'close')
+      OR (lg_delivery_areas_events.action_type = 'delay'
+        AND LOWER(lg_delivery_areas_events.title) LIKE '%surge%'
+        AND LOWER(lg_delivery_areas_events.title) NOT LIKE '%\\_ng%'
+        AND LOWER(lg_delivery_areas_events.title) NOT LIKE '%non%'
+        AND LOWER(lg_delivery_areas_events.title) NOT LIKE '%normal%') )
+    AND lg_delivery_areas_events.lg_zone_id IS NOT NULL
+    AND lg_delivery_areas_events.is_active ),
+  lg_countries AS (
+  SELECT
+    DISTINCT country_code,
+    c.id AS city_id,
+    c.name AS city_name,
+    z.id AS zone_id,
+    z.name AS zone_name
+  FROM
+    `fulfillment-dwh-production.pandata_curated.lg_countries`
+  CROSS JOIN
+    UNNEST (cities) AS c
+  CROSS JOIN
+    UNNEST (c.zones) AS z
+  CROSS JOIN
+    UNNEST (z.starting_points) AS stp
+  WHERE
+    country_code IN ('bd') ),
+  seamless_data AS (
+  SELECT
+    *,
+    ROUND((1 - IFNULL(SAFE_DIVIDE(total_orders_with_issues,total_gross_orders),0))*100,2) AS seamless_order_percentage
+  FROM (
+    SELECT
+      EXTRACT(ISOWEEK
+      FROM
+        DATE_TRUNC(DATE(pd_orders.created_at_local),day)) AS week_of,
+      pd_orders.country_name,
+      COUNT(DISTINCT lg_orders.order_code) AS order_count,
+      COUNT(DISTINCT
+        CASE
+          WHEN pd_basket_updates.order_id IS NOT NULL AND pd_orders.vertical_type IN ('restaurants', 'dmart', 'kitchens', 'concepts', 'shops') THEN lg_orders.order_code
+      END
+        ) AS Partial_Cancelled_orders,
+      COUNT(DISTINCT
+        CASE
+          WHEN ABS(lg_orders.rider.actual_delivery_time_in_seconds - lg_orders.rider.promised_delivery_time_in_seconds) / 60 > 10 AND pd_orders.vertical_type IN ('restaurants', 'dmart', 'kitchens', 'concepts', 'shops') THEN lg_orders.order_code
+      END
+        ) AS delayed_orders,
+      COUNT(DISTINCT
+        CASE
+          WHEN (lg_orders.rider.promised_delivery_time_in_seconds - lg_orders.rider.actual_delivery_time_in_seconds) / 60 > 10 AND pd_orders.vertical_type IN ('restaurants', 'dmart', 'kitchens', 'concepts', 'shops') THEN lg_orders.order_code
+      END
+        ) AS pdt_early_orders,
+      COUNT(DISTINCT
+        CASE
+          WHEN (lg_orders.rider.actual_delivery_time_in_seconds - lg_orders.rider.promised_delivery_time_in_seconds) / 60 > 10 AND pd_orders.vertical_type IN ('restaurants', 'dmart', 'kitchens', 'concepts', 'shops') THEN lg_orders.order_code
+      END
+        ) AS pdt_late_orders,
+      COUNT(DISTINCT
+        CASE
+          WHEN ( deliveries.delivery_distance_in_meters <= (long_distance_thresholds.distance_threshold_in_km * 1000) AND NOT lg_orders.is_preorder AND lg_orders.rider.actual_delivery_time_in_seconds / 60 > 30 AND pd_orders.vertical_type IN ('restaurants', 'dmart') ) THEN lg_orders.order_code
+      END
+        ) AS SDD_30mins_Plus_orders,
+      COUNT(DISTINCT
+        CASE
+          WHEN ( deliveries.delivery_distance_in_meters > (long_distance_thresholds.distance_threshold_in_km * 1000) AND NOT lg_orders.is_preorder AND lg_orders.rider.actual_delivery_time_in_seconds / 60 > 45 AND pd_orders.vertical_type IN ('restaurants', 'dmart') ) THEN lg_orders.order_code
+      END
+        ) AS LDD_45mins_Plus_orders,
+      COUNT(CASE
+          WHEN rider.actual_delivery_time_in_seconds/60 < 30 AND deliveries.delivery_distance_in_meters<(long_distance_thresholds.distance_threshold_in_km * 1000) AND pd_orders.vertical_type IN ('restaurants', 'dmart') THEN lg_orders.order_code
+      END
+        ) AS SDD_dt_30mins_Less,
+      COUNT(CASE
+          WHEN rider.actual_delivery_time_in_seconds/60 < 45 AND deliveries.delivery_distance_in_meters>=(long_distance_thresholds.distance_threshold_in_km * 1000) AND pd_orders.vertical_type IN ('restaurants', 'dmart') THEN lg_orders.order_code
+        ELSE
+        NULL
+      END
+        ) AS LDD_dt_45mins_Less,
+      ROUND(AVG(rider.actual_delivery_time_in_seconds/60),2) AS avg_actual_dt,
+      ROUND(AVG(deliveries.dispatching_time_in_seconds/60),2) AS avg_dispatch,
+      ROUND(AVG(rider.hold_back_time_in_seconds/60),2) AS avg_hold_back,
+      ROUND(AVG(deliveries.rider_accepting_time_in_seconds /60),2) AS avg_rider_accept,
+      ROUND(AVG(rider.estimated_prep_time_in_seconds /60),2) AS avg_est_prep_time,
+      ROUND(AVG(deliveries.to_vendor_time_in_seconds /60),2) AS avg_to_vendor,
+      ROUND(AVG(deliveries.at_vendor_time_in_seconds /60),2) AS avg_at_vendor,
+      ROUND(AVG(deliveries.at_vendor_time_cleaned_in_seconds /60),2) AS at_vendor_cleaned,
+      ROUND(AVG(deliveries.at_customer_time_in_seconds /60),2) AS avg_at_cust,
+      ROUND(AVG(deliveries.to_customer_time_in_seconds /60),2) AS avg_to_cust,
+      SAFE_DIVIDE(COUNT(DISTINCT
+          CASE
+            WHEN deliveries.is_stacked_intravendor=TRUE AND pd_orders.vertical_type IN ('restaurants', 'dmart', 'kitchens', 'concepts', 'shops') THEN lg_orders.order_code
+        END
+          ), COUNT(DISTINCT bd.order_code))*100 AS stacking,
+      COUNTIF(ticket_orders.order_code IS NOT NULL
+        AND pd_orders.vertical_type IN ('restaurants',
+          'dmart',
+          'kitchens',
+          'concepts',
+          'shops')) AS ticket_orders,
+      COUNTIF(NOT lg_orders.is_preorder
+        AND rider.actual_delivery_time_in_seconds / 60 > 30
+        AND pd_orders.vertical_type IN ('restaurants',
+          'dmart',
+          'kitchens',
+          'concepts',
+          'shops')) AS orders_more_than_30mins,
+      COUNTIF(pd_basket_updates.order_id IS NOT NULL
+        AND pd_orders.vertical_type IN ('restaurants',
+          'dmart',
+          'kitchens',
+          'concepts',
+          'shops')) AS basket_updated_orders,
+      COUNTIF(ABS(lg_orders.rider.actual_delivery_time_in_seconds - lg_orders.rider.promised_delivery_time_in_seconds) / 60 > 10
+        AND pd_orders.vertical_type IN ('restaurants',
+          'dmart',
+          'kitchens',
+          'concepts',
+          'shops')) AS orders_not_on_time,
+      COUNTIF(pd_orders.is_failed_order
+        AND pd_orders.vertical_type IN ('restaurants',
+          'dmart',
+          'kitchens',
+          'concepts',
+          'shops')) AS total_failed_orders,
+      CASE
+        WHEN ANY_VALUE(pd_vendors_agg_business_types.is_shops) THEN COUNTIF( pd_orders.is_failed_order OR ticket_orders.order_code IS NOT NULL OR pd_basket_updates.order_id IS NOT NULL OR (ABS(lg_orders.rider.actual_delivery_time_in_seconds - lg_orders.rider.promised_delivery_time_in_seconds) / 60 > 10))
+      ELSE
+      COUNTIF( pd_orders.is_failed_order
+        OR ticket_orders.order_code IS NOT NULL
+        OR pd_basket_updates.order_id IS NOT NULL
+        OR (ABS(lg_orders.rider.actual_delivery_time_in_seconds - lg_orders.rider.promised_delivery_time_in_seconds) / 60 > 10)
+        OR ( deliveries.delivery_distance_in_meters <= (long_distance_thresholds.distance_threshold_in_km * 1000)
+          AND NOT lg_orders.is_preorder
+          AND lg_orders.rider.actual_delivery_time_in_seconds / 60 > 30
+          AND pd_vendors_agg_business_types.business_type_apac IN ('restaurants',
+            'dmart') )
+        OR ( deliveries.delivery_distance_in_meters > (long_distance_thresholds.distance_threshold_in_km * 1000)
+          AND NOT lg_orders.is_preorder
+          AND lg_orders.rider.actual_delivery_time_in_seconds / 60 > 45
+          AND pd_vendors_agg_business_types.business_type_apac IN ('restaurants',
+            'dmart') ) )
+    END
+      AS total_orders_with_issues,
+      COUNT(*) AS total_gross_orders
+    FROM
+      `fulfillment-dwh-production.pandata_curated.lg_orders` AS lg_orders
+    LEFT JOIN
+      UNNEST(lg_orders.rider.deliveries) AS deliveries
+    ON
+      deliveries.is_primary
+    LEFT JOIN
+      UNNEST (deliveries.stacked_deliveries) AS stack
+    ON
+      deliveries.is_primary
+    LEFT JOIN
+      pd_orders
+    ON
+      pd_orders.global_entity_id = lg_orders.global_entity_id
+      AND pd_orders.code = lg_orders.order_code
+      AND pd_orders.created_date_utc BETWEEN '2022-01-01'
+      AND '2022-12-31'
+    LEFT JOIN
+      `fulfillment-dwh-production.pandata_curated.pd_vendors` AS pd_vendors
+    ON
+      pd_vendors.global_entity_id = pd_orders.global_entity_id
+      AND pd_vendors.vendor_code = pd_orders.vendor_code
+    LEFT JOIN
+      `fulfillment-dwh-production.pandata_curated.shared_countries` AS shared_countries
+    ON
+      shared_countries.global_entity_id = lg_orders.global_entity_id
+    LEFT JOIN
+      ticket_orders
+    ON
+      shared_countries.currency_code_iso = ticket_orders.currency_code_iso
+      AND lg_orders.order_code = ticket_orders.order_code
+    LEFT JOIN
+      `fulfillment-dwh-production.pandata_report.regional_apac_pd_vendors_agg_business_types` pd_vendors_agg_business_types
+    ON
+      pd_vendors_agg_business_types.uuid = pd_vendors.uuid
+    LEFT JOIN
+      `fulfillment-dwh-production.pandata_curated.pd_basket_updates` pd_basket_updates
+    ON
+      pd_basket_updates.global_entity_id = pd_orders.global_entity_id
+      AND pd_basket_updates.order_id = pd_orders.id
+    LEFT JOIN
+      `fulfillment-dwh-production.pandata_report.lg_long_distance_threshold` AS long_distance_thresholds
+    ON
+      long_distance_thresholds.lg_country_code = lg_orders.rider.lg_country_code
+    LEFT JOIN
+      lg_countries
+    ON
+      lg_countries.zone_id=lg_orders.rider.lg_zone_id
+    LEFT JOIN
+      `fulfillment-dwh-production.pandata_report.country_BD_bd_analytics` bd
+    ON
+      bd.order_code = lg_orders.order_code
+    WHERE
+      lg_orders.created_date_utc BETWEEN '2022-01-01'
+      AND '2022-12-31'
+      AND lg_orders.created_date_local BETWEEN '2022-01-01'
+      AND '2022-12-31'
+      AND pd_orders.is_gross_order
+      AND pd_orders.created_date_utc BETWEEN '2022-01-01'
+      AND '2022-12-31'
+      AND pd_orders.is_own_delivery
+      AND lg_orders.global_entity_id = 'FP_BD'
+    GROUP BY
+      1,
+      2 ))
+SELECT
+  *,
+FROM
+  seamless_data
+ORDER BY
+  week_of DESC,
+  order_count DESC
+  
+
+### Extracting weekly country wide deliveries completed, rider fill rate & total rider working hrs
+
+
+DECLARE
+  start_date DATE DEFAULT '2022-01-01';
+DECLARE
+  end_date DATE DEFAULT '2022-12-31';
+
+
+WITH weekly_working_hrs AS (
+  SELECT
+    EXTRACT(ISOWEEK FROM actual_start_at_local) as week_of,
+    global_entity_id,
+    SUM(actual_working_time_in_seconds/3600) AS working_hours,
+    COUNT(DISTINCT id) AS shifts,
+    SAFE_DIVIDE(
+      COUNT(DISTINCT CASE WHEN state = 'EVALUATED' THEN id END),
+      COUNT(DISTINCT id) *100
+    ) as fill_rate
+  FROM
+    `fulfillment-dwh-production.pandata_curated.lg_shifts` shifts
+  
+  WHERE
+    created_at_local BETWEEN start_date
+    AND end_date
+    AND created_date_utc BETWEEN start_date
+    AND end_date
+    AND global_entity_id IN ('FP_BD')
+    AND lg_country_code = 'bd'
+
+
+  GROUP BY
+    1,
+    2 ),
+
+
+
+
+weekly_deliveries AS (
+  SELECT
+    EXTRACT(ISOWEEK FROM rider.created_at_local) as week_of,
+    global_entity_id,
+    COUNT(DISTINCT order_code) AS deliveries,
+    SAFE_DIVIDE(COUNT(
+        CASE
+          WHEN t.state="accepted" THEN order_code
+      END
+        ), COUNT(
+        CASE
+          WHEN t.state="courier_notified" THEN order_code
+      END
+        ))*100 AS acceptance_rate
+  FROM
+    `fulfillment-dwh-production.pandata_curated.lg_orders`
+  CROSS JOIN
+    UNNEST (rider.deliveries) AS deliveries
+  CROSS JOIN
+    UNNEST (deliveries.transitions) AS t
+  WHERE
+    created_date_utc BETWEEN start_date
+    AND end_date
+    AND global_entity_id IN ('FP_BD')
+    AND rider.lg_country_code = 'bd'
+  GROUP BY
+    1,
+    2
+  )
+
+
+SELECT
+  orders.week_of,
+  deliveries,
+  working_hrs,
+  acceptance_rate
+  fill_rate
+
+
+FROM 
+  weekly_deliveries as orders
+LEFT JOIN
+  weekly_working_hrs as working_hrs
+ON
+  orders.global_entity_id = working_hrs.global_entity_id
+AND 
+  orders.week_of = working_hrs.week_of
+
+
+ORDER BY
+  working_hours DESC,
+  deliveries DESC
+
+
+###  Extracting weekly country wide overall weighted surge, shrink & closure %
+
+WITH weekly_surge_experience AS (
+  SELECT
+    global_entity_id,
+    lg_country_code,
+    EXTRACT(ISOWEEK FROM created_date_local) as week_of,
+    COUNT(CASE WHEN is_surged THEN order_code END) AS surged_order_experience,
+    COUNT(CASE WHEN is_surged_1 THEN order_code END) AS surged_1st_order_experience,
+    COUNT(CASE WHEN is_surged_2 THEN order_code END) AS surged_2nd_order_experience,
+    COUNT(CASE WHEN is_surged_3 THEN order_code END) AS surged_3rd_order_experience,
+    COUNT(CASE WHEN is_surged_4 THEN order_code END) AS surged_4th_order_experience,
+    COUNT(CASE WHEN is_surged_above_4 THEN order_code END) AS surged_above_4_order_experience,
+    COUNT(order_code) AS actual_orders
+  FROM `fulfillment-dwh-production.pandata_report.regional_apac_lg_surged_orders_experienced`  
+  WHERE created_date_local BETWEEN '2022-01-01' AND '2022-12-31'
+    AND lg_zone_id IS NOT NULL
+  GROUP BY 1,2,3
+),
+
+
+weekly_shrink_close_events AS (
+  SELECT 
+    global_entity_id,
+    lg_country_code, 
+    EXTRACT(ISOWEEK FROM date_local) as week_of,
+    SUM(forecasted_orders) AS forecasted_orders,
+    SUM(shrink_orders) AS shrink_orders,
+    SUM(shrink_0_orders) AS shrink_0_orders,
+    SUM(shrink_1st_orders) AS shrink_1st_orders,
+    SUM(shrink_2nd_orders) AS shrink_2nd_orders,
+    SUM(shrink_3rd_orders) AS shrink_3rd_orders,
+    SUM(shrink_4th_orders) AS shrink_4th_orders,
+    SUM(shrink_5th_orders) AS shrink_5th_orders,
+    SUM(shrink_6th_orders) AS shrink_6th_orders,
+    SUM(close_orders) AS close_orders
+  FROM `fulfillment-dwh-production.pandata_report.regional_apac_lg_weighted_das_events_hourly` 
+  WHERE date_local BETWEEN '2022-01-01' AND '2022-12-31'
+  GROUP BY 1,2,3
+)
+
+
+SELECT 
+  surge.global_entity_id,
+  surge.lg_country_code AS country_code,
+  surge.week_of, 
+  SUM(surge.actual_orders) AS actual_orders,
+  SUM(shrink_close.forecasted_orders) AS forecasted_orders,
+  round(SAFE_DIVIDE(SUM(surge.surged_order_experience), SUM(surge.actual_orders))*100,2) AS percent_surge_time,
+  round(SAFE_DIVIDE(SUM(surge.surged_1st_order_experience), SUM(surge.actual_orders))*100,2) AS percent_surge_1st_time,
+  round(SAFE_DIVIDE(SUM(surge.surged_2nd_order_experience), SUM(surge.actual_orders))*100,2) AS percent_surge_2nd_time,
+  round(SAFE_DIVIDE(SUM(surge.surged_3rd_order_experience), SUM(surge.actual_orders))*100,2) AS percent_surge_3rd_time,
+  round(SAFE_DIVIDE(SUM(shrink_close.shrink_orders), SUM(shrink_close.forecasted_orders))*100,2) AS percent_shrink_event_time,
+  round(SAFE_DIVIDE(SUM(shrink_close.shrink_1st_orders), SUM(shrink_close.forecasted_orders))*100,2) AS percent_shrink_1st_time,
+  round(SAFE_DIVIDE(SUM(shrink_close.shrink_2nd_orders), SUM(shrink_close.forecasted_orders))*100,2) AS percent_shrink_2nd_time,
+  round(SAFE_DIVIDE(SUM(shrink_close.shrink_3rd_orders), SUM(shrink_close.forecasted_orders))*100,2) AS percent_shrink_3rd_time,
+  round(SAFE_DIVIDE(SUM(shrink_close.close_orders), SUM(shrink_close.forecasted_orders))*100,2) AS percent_close_event_time,
+
+
+  --CURRENT_DATE('Bangladesh') AS refresh_date
+
+
+FROM weekly_surge_experience AS surge
+LEFT JOIN weekly_shrink_close_events AS shrink_close
+       ON surge.global_entity_id = shrink_close.global_entity_id
+       and surge.lg_country_code = shrink_close.lg_country_code
+       and surge.week_of = shrink_close.week_of
+   
+GROUP BY 1,2,3
+ORDER BY surge.lg_country_code, week_of ASC
+
+
+### Calculating countrywide weekly customer Reorder Rates (7/30/60 Days)
+
+WITH
+  next_last_order_dates AS (
+  SELECT
+    uuid,
+    code,
+    pd_customer_uuid,
+    global_entity_id,
+    ordered_at_local,
+    ordered_at_date_local,
+    created_date_utc,
+    DATE( LEAD(ordered_at_local) OVER (PARTITION BY global_entity_id, pd_customer_id ORDER BY ordered_at_local ASC ) ) AS next_valid_order_date,
+    DATE( LAG(ordered_at_local) OVER (PARTITION BY global_entity_id, pd_customer_id ORDER BY ordered_at_local ASC ) ) AS last_valid_order_date,
+  FROM
+    `fulfillment-dwh-production.pandata_curated.pd_orders`
+  WHERE
+    created_date_utc BETWEEN '2022-01-01'
+    AND '2022-12-31'
+    AND ordered_at_utc BETWEEN '2022-01-01'
+    AND '2022-12-31'
+    AND is_valid_order ),
+  reorder AS (
+  SELECT
+    uuid,
+    code,
+    pd_customer_uuid,
+    global_entity_id,
+    ordered_at_local,
+    ordered_at_date_local,
+    created_date_utc,
+    next_valid_order_date,
+    last_valid_order_date,
+    DATE_DIFF(next_valid_order_date, DATE(ordered_at_local), DAY) AS date_diff_between_next_valid_order,
+    DATE_DIFF(DATE(ordered_at_local), last_valid_order_date, DAY) AS date_diff_between_last_valid_order,
+    IFNULL(DATE_DIFF(next_valid_order_date, DATE(ordered_at_local), DAY) <= 7, FALSE) AS has_valid_reordered_in_7days,
+    IFNULL(DATE_DIFF(next_valid_order_date, DATE(ordered_at_local), DAY) <= 30, FALSE) AS has_valid_reordered_in_30days,
+    IFNULL(DATE_DIFF(next_valid_order_date, DATE(ordered_at_local), DAY) <= 60, FALSE) AS has_valid_reordered_in_60days,
+    IFNULL(DATE_DIFF(next_valid_order_date, DATE(ordered_at_local), DAY) <= 90, FALSE) AS has_valid_reordered_in_90days,
+    DATE_DIFF(DATE(ordered_at_local), next_valid_order_date, DAY) IS NOT NULL AS has_valid_reordered,
+  FROM
+    next_last_order_dates )
+SELECT
+  week,
+  total_compensation_orders,
+  overall_reordered,
+  ROUND((overall_reordered/total_compensation_orders)*100,2) AS overall_reordered_percentage,
+  reordered_7days,
+  ROUND((reordered_7days/(total_compensation_orders))*100,2) AS Reordered_7days_percentage,
+  reordered_30days,
+  ROUND((reordered_30days/(total_compensation_orders))*100,2) AS Reordered_30days_percentage
+FROM (
+  SELECT
+    DISTINCT FORMAT_DATE('%Y-%V',reorder.created_date_utc) AS week,
+    COUNT(DISTINCT order_code) AS total_compensation_orders,
+    COUNT(DISTINCT
+      CASE
+        WHEN reorder.has_valid_reordered=TRUE THEN order_code
+    END
+      ) AS overall_reordered,
+    COUNT(DISTINCT
+      CASE
+        WHEN reorder.has_valid_reordered_in_7days=TRUE THEN order_code
+    END
+      ) AS reordered_7days,
+    COUNT(DISTINCT
+      CASE
+        WHEN reorder.has_valid_reordered_in_30days=TRUE THEN order_code
+    END
+      ) AS reordered_30days,
+  FROM
+    `fulfillment-dwh-production.pandata_curated.gcc_compensation_and_refund_events` AS comp
+  LEFT JOIN
+    reorder
+  ON
+    reorder.code=comp.order_code
+  WHERE
+    comp.global_entity_id='FP_BD'
+    AND comp.created_date_utc BETWEEN '2022-01-01'
+    AND '2022-12-31'
+    AND event_type LIKE ('%Compensation%')
+  GROUP BY
+    1
+  ORDER BY
+    1 DESC)
+
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Calculating countrywide weekly rider earnings and cost per order
+
+
+DECLARE start_period_local DATE DEFAULT '2022-01-01';
+DECLARE end_period_local   DATE DEFAULT '2022-12-31';
+
+
+-- city info
+WITH rider_city_id AS (
+  SELECT DISTINCT 
+    lg_country_code, 
+    r.id AS rider_id, 
+    c.lg_city_id, 
+    c.start_at_local AS contract_start
+  FROM `fulfillment-dwh-production.pandata_curated.lg_riders` AS r
+  CROSS JOIN UNNEST (contracts) AS c
+  WHERE lg_country_code IN ('bd')
+    AND c.status = 'VALID' 
+),
+
+
+rider_latest_contract AS (
+  SELECT DISTINCT 
+    lg_country_code, 
+    r.id AS rider_id, 
+    MAX(c.start_at_local) AS contract_start
+  FROM `fulfillment-dwh-production.pandata_curated.lg_riders` AS r
+  CROSS JOIN UNNEST (contracts) AS c
+  WHERE lg_country_code IN ('bd')
+    AND c.status = 'VALID' 
+  GROUP BY 1,2
+),
+
+
+city AS (
+  SELECT DISTINCT 
+    country_code, 
+    cities.id AS city_id, 
+    cities.name AS city_name
+  FROM `fulfillment-dwh-production.pandata_curated.lg_countries` AS c
+  CROSS JOIN UNNEST (cities) AS cities
+  WHERE country_code IN ('bd')
+   --AND cities.is_active
+),
+
+
+rider_city AS (
+  SELECT 
+    rider_latest_contract.lg_country_code,
+    rider_latest_contract.rider_id, 
+    rider_city_id.lg_city_id AS city_id, 
+    city.city_name
+  FROM rider_latest_contract
+  LEFT JOIN rider_city_id 
+         ON rider_latest_contract.lg_country_code = rider_city_id.lg_country_code 
+        AND rider_latest_contract.rider_id = rider_city_id.rider_id 
+        AND rider_latest_contract.contract_start = rider_city_id.contract_start
+  LEFT JOIN city 
+         ON rider_city_id.lg_country_code = city.country_code 
+        AND rider_city_id.lg_city_id = city.city_id
+),
+
+
+-- Rooster basic payments extraction
+basic as(
+WITH pa AS (
+  SELECT 
+    lg_country_code, 
+    lg_rider_id,
+    basic.lg_payments_basic_rule_id AS lg_payments_basic_rule_id,
+    created_date_local,
+    IFNULL(basic.total_local,0) AS total
+  FROM `fulfillment-dwh-production.pandata_curated.lg_daily_rider_payments` AS lg_daily_rider_payments
+  CROSS JOIN UNNEST (details.basic) AS basic
+  WHERE lg_country_code IN ('bd')
+    AND basic.status IN ('PAID', 'PENDING')
+    AND created_date_local BETWEEN start_period_local and end_period_local
+  ),
+
+
+  ru AS (
+    SELECT DISTINCT 
+      lg_country_code, 
+      id, 
+      type, 
+      sub_type
+    FROM `fulfillment-dwh-production.pandata_curated.lg_payments_basic_rules` AS lg_payments_basic_rules
+  )
+
+
+SELECT 
+    pa.lg_country_code, 
+    rider_city.city_name,
+    pa.created_date_local, 
+    SUM (CASE WHEN ru.type = 'MINIMUM_PER_HOUR' THEN IFNULL(pa.total,0) ELSE NULL END) AS minimum_guaranteed,
+    SUM (CASE WHEN ru.type = 'PER_DELIVERY' THEN IFNULL(pa.total,0) ELSE NULL END) AS order_component,
+    SUM (CASE WHEN ru.type = 'PER_HOUR' THEN IFNULL(pa.total,0) ELSE NULL END) AS hour_component,
+    SUM (CASE WHEN ru.type = 'PER_KM' THEN IFNULL(pa.total,0) ELSE NULL END) AS distance_component,
+    SUM (CASE WHEN ru.type IS NULL THEN IFNULL(pa.total,0) ELSE NULL END) AS fallback_pay
+FROM pa 
+LEFT JOIN ru 
+       ON pa.lg_country_code = ru.lg_country_code 
+      AND ru.id = pa.lg_payments_basic_rule_id
+LEFT JOIN rider_city 
+       ON pa.lg_country_code = rider_city.lg_country_code
+      AND pa.lg_rider_id = rider_city.rider_id
+WHERE pa.lg_country_code IN ('bd')
+GROUP BY 1,2,3
+ORDER BY 1,2,3
+),
+
+
+-- Rooster scoring payments extraction
+scoring as (
+  SELECT 
+    s.lg_country_code, 
+    rider_city.city_name,
+    s.created_date_local,
+    SUM(IFNULL(scoring.total_local,0)) AS Total_Scoring_Payment     
+  FROM `fulfillment-dwh-production.pandata_curated.lg_daily_rider_payments` AS s
+  CROSS JOIN UNNEST (details.scoring) AS scoring
+  LEFT JOIN rider_city 
+        ON s.lg_country_code = rider_city.lg_country_code
+       AND s.lg_rider_id = rider_city.rider_id    
+  WHERE s.lg_country_code IN ('bd')
+    AND scoring.status IN ('PAID', 'PENDING')
+    AND created_date_local BETWEEN start_period_local and end_period_local
+    GROUP BY 1,2,3
+    ORDER BY 1,2,3
+),
+
+
+-- Rooster quest payments extraction - change timestamps for quest extraction
+quest as (
+  SELECT 
+    q.lg_country_code, 
+    rider_city.city_name,
+    DATE(DATETIME_SUB(DATETIME(quest.created_at_local), INTERVAL 1 SECOND)) AS quest_adjusted_date_local,
+    SUM(IFNULL(quest.total_local, 0)) as Total_Quest_Payment      
+  FROM `fulfillment-dwh-production.pandata_curated.lg_daily_rider_payments` AS q
+  CROSS JOIN UNNEST (details.quest) AS quest
+  LEFT JOIN rider_city 
+        ON q.lg_country_code = rider_city.lg_country_code
+       AND q.lg_rider_id = rider_city.rider_id  
+  WHERE q.lg_country_code IN ('bd','kh','hk','la','my','mm','ph','pk','sg','th','tw','jp')
+    AND q.created_date_local BETWEEN start_period_local and DATE_ADD(end_period_local, INTERVAL 1 DAY)
+    AND quest.created_at_local > DATETIME_TRUNC(DATETIME(start_period_local), SECOND)
+    AND quest.created_at_local <= DATETIME_TRUNC(DATETIME(DATE_ADD(end_period_local, INTERVAL 1 DAY)), SECOND)
+    AND quest.status IN ('PAID', 'PENDING')
+  GROUP BY 1,2,3
+  ORDER BY 1,2,3
+),
+
+
+--- csv
+csv AS (
+  SELECT 
+    sp.lg_country_code,
+    rider_city.city_name,
+    created_date_local,
+    SUM(IFNULL(payment_details.payment_local,0)) as csv_payment_local
+  FROM `fulfillment-dwh-production.pandata_curated.lg_rider_special_payments` sp
+  LEFT JOIN UNNEST (payment_details) AS payment_details
+  LEFT JOIN rider_city 
+        ON sp.lg_country_code = rider_city.lg_country_code
+       AND sp.lg_rider_id = rider_city.rider_id 
+  WHERE payment_details.adjustment_type = 'FEE'
+    AND sp.lg_country_code IN ('bd')
+    AND sp.created_date_local BETWEEN start_period_local AND end_period_local
+  GROUP BY 1,2,3
+  ORDER BY 1,2,3
+),
+
+
+-- completed orders
+
+
+orders AS (
+    WITH lo AS (
+      SELECT DISTINCT 
+        global_entity_id, 
+        rider.lg_country_code, 
+        d.lg_rider_id,
+        rider.order_id, 
+        order_code, 
+        d.rider_accepted_at_local
+      FROM `fulfillment-dwh-production.pandata_curated.lg_orders` od
+      CROSS JOIN UNNEST (rider.deliveries) AS d
+      WHERE DATE(d.rider_accepted_at_local) BETWEEN start_period_local AND end_period_local
+        AND od.created_date_utc BETWEEN DATE_SUB(start_period_local, INTERVAL 31 DAY) and end_period_local
+        AND global_entity_id IN ('FP_BD')
+        AND rider.order_status = 'completed'
+    ),
+
+
+    fo AS (
+        WITH nonpg_orders AS (
+          SELECT DISTINCT 
+            global_entity_id, 
+            code AS order_code
+          FROM `fulfillment-dwh-production.pandata_curated.pd_orders`
+          WHERE created_date_local BETWEEN start_period_local AND end_period_local
+            AND created_date_utc BETWEEN DATE_SUB(start_period_local, INTERVAL 31 DAY) and end_period_local
+            AND global_entity_id IN ('FP_BD')
+            AND is_own_delivery
+            AND NOT is_test_order AND is_valid_order AND NOT is_failed_order
+        ),
+
+
+        odr_orders AS (
+          SELECT DISTINCT 
+            global_entity_id, 
+            id AS order_code
+        FROM `fulfillment-dwh-production.pandata_curated.odr_orders`
+        WHERE DATE(created_at_local) BETWEEN start_period_local AND end_period_local
+          AND created_date_utc BETWEEN DATE_SUB(start_period_local, INTERVAL 31 DAY) and end_period_local
+          AND global_entity_id IN ('FP_BD')
+          AND status IN ('DELIVERED', 'NEAR_CUSTOMER')
+        ),
+
+
+        pp_orders AS (
+            WITH orders AS (
+              SELECT 
+                od.global_entity_id, 
+                entity.id AS entity_id, 
+                order_code, 
+                rider.order_value_local, 
+                SUM(dropoff_distance_manhattan_in_meters) AS dropoff_distance_manhattan_in_meters
+              FROM `fulfillment-dwh-production.pandata_curated.lg_orders` od
+              CROSS JOIN UNNEST (rider.deliveries) AS d
+              WHERE DATE(d.rider_accepted_at_local) BETWEEN start_period_local AND end_period_local
+                AND od.created_date_utc BETWEEN DATE_SUB(start_period_local, INTERVAL 31 DAY) and end_period_local
+                AND global_entity_id IN ('FP_BD')
+                AND rider.order_status = 'completed'
+                AND entity.id NOT LIKE '%FP%' AND entity.id NOT LIKE '%ODR%'
+              GROUP BY 1,2,3,4
+            ),
+
+
+            pgpartners AS (
+              SELECT 
+              entity_id, 
+              base_price_local, 
+              commission_percentage, 
+              per_km_price_local, 
+              min_distance_threshold_in_km
+            FROM `fulfillment-dwh-production.pandata_report.pandago_laas_pricing`
+            WHERE end_date IS NULL
+            )
+
+
+            SELECT 
+              orders.global_entity_id, 
+              orders.order_code
+            FROM orders
+            LEFT JOIN pgpartners 
+                   ON orders.entity_id = pgpartners.entity_id
+        )
+
+
+        SELECT * FROM nonpg_orders
+        UNION ALL
+        SELECT * FROM odr_orders
+        UNION ALL 
+        SELECT * FROM pp_orders
+    )
+
+
+SELECT 
+  lo.lg_country_code,
+  rider_city.city_name,
+  DATE(lo.rider_accepted_at_local) AS created_date_local,
+  COUNT(DISTINCT(lo.order_id)) as completed_orders
+FROM lo
+INNER JOIN fo 
+        ON lo.global_entity_id = fo.global_entity_id 
+      AND lo.order_code = fo.order_code
+LEFT JOIN rider_city 
+       ON lo.lg_country_code = rider_city.lg_country_code
+      AND lo.lg_rider_id = rider_city.rider_id  
+GROUP BY 1,2,3
+ORDER BY 1,2,3
+)
+
+
+-- final
+SELECT 
+    week,
+    completed_orders as deliveries,
+   (Total_Scoring_Payment + Total_Quest_Payment + Total_CSV_Payment + order_component + hour_component + distance_component) as total_rider_earnings,
+  round(safe_divide( (Total_Scoring_Payment + Total_Quest_Payment + Total_CSV_Payment + order_component + hour_component + distance_component), ),2) as CPO
+
+
+FROM 
+  (    
+SELECT
+  basic.lg_country_code,
+ -- basic.city_name,
+  date_trunc(basic.created_date_local,week) as week,
+  ROUND(SUM(IFNULL(Total_Scoring_Payment,0)),4) AS Total_Scoring_Payment ,
+  ROUND(SUM(IFNULL(Total_Quest_Payment,0)),4) AS Total_Quest_Payment,
+  ROUND(SUM(IFNULL(csv_payment_local,0)),4) AS Total_CSV_Payment,
+  ROUND(SUM(IFNULL(minimum_guaranteed,0)),4) AS minimum_guaranteed,
+  ROUND(SUM(IFNULL(order_component,0)),4) AS order_component,
+  ROUND(SUM(IFNULL(hour_component,0)),4) AS hour_component,
+  ROUND(SUM(IFNULL(distance_component,0)),4) AS distance_component,
+  ROUND(SUM(IFNULL(fallback_pay,0)),4) AS fallback_pay,
+  ROUND( (SUM(IFNULL(Total_Scoring_Payment,0))) / (SUM(completed_orders)), 4) as batch_cpo_local_currency,
+  ROUND( (SUM(IFNULL(Total_Quest_Payment,0))) / (SUM(completed_orders)), 4) as quest_cpo_local_currency,
+  ROUND( (SUM(IFNULL(minimum_guaranteed,0))) / (SUM(completed_orders)), 4) as  minimum_guaranteed_cpo_local_currency,
+  ROUND( (SUM(IFNULL(order_component,0))) / (SUM(completed_orders)), 4) as order_component_local_currency,
+  ROUND( (SUM(IFNULL(hour_component,0))) / (SUM(completed_orders)), 4) as hour_component_local_currency,
+  ROUND( (SUM(IFNULL(distance_component,0))) / (SUM(completed_orders)), 4) as distance_component_local_currency,
+  ROUND( (SUM(IFNULL(fallback_pay,0))) / (SUM(completed_orders)), 4) as fallback_local_currency,
+  ROUND( (SUM(IFNULL(csv_payment_local,0))) / (SUM(completed_orders)), 4) as csv_local_currency,
+  SUM(completed_orders) AS completed_orders,
+
+
+  
+FROM basic
+LEFT JOIN scoring
+       ON scoring.lg_country_code = basic.lg_country_code
+      AND scoring.city_name = basic.city_name
+      AND scoring.created_date_local = basic.created_date_local 
+LEFT JOIN quest 
+       ON quest.lg_country_code = basic.lg_country_code
+      AND quest.city_name = basic.city_name
+      AND quest.quest_adjusted_date_local = basic.created_date_local  
+LEFT JOIN csv
+       ON csv.lg_country_code = basic.lg_country_code
+      AND csv.city_name = basic.city_name
+      AND csv.created_date_local = basic.created_date_local            
+LEFT JOIN orders 
+       ON orders.lg_country_code = basic.lg_country_code
+      AND orders.city_name = basic.city_name
+      AND orders.created_date_local = basic.created_date_local
+WHERE basic.lg_country_code IN ('bd')
+GROUP BY 1,2
+ORDER BY 1,2
+
+
+  )
+ORDER BY 1 ASC
+
+
+
+
+### Calculating countrywide customer refund & compensation cost
+
+DECLARE
+  start_date DEFAULT '2022-01-01';
+DECLARE
+  end_date DEFAULT '2022-12-31';
+
+
+WITH refund_vouchers AS (
+  SELECT 
+    distinct
+    date_trunc(date(created_at_local),week) AS week,
+    SUM(refund_value_local) AS voucher_refund_value,
+  
+
+
+  FROM `fulfillment-dwh-production.pandata_curated.gcc_compensation_and_refund_events`
+
+
+  WHERE 
+       created_date_utc between start_date and end_date
+    AND created_at_local between start_date and end_date
+    AND global_entity_id = "FP_BD"
+    AND event_type in ("Refund")
+    AND voucher_code is not null
+  
+  GROUP BY 1
+),
+
+
+wallet_refunds AS (
+  SELECT
+    distinct
+    date_trunc(date(ordered_at_local),week) AS week,
+    SUM(CAST(SPLIT(REGEXP_EXTRACT(order_comment, r".*refund ([^/$]*)to WALLET.*"),' ')[OFFSET(1)] AS FLOAT64)) AS wallet_partial_refunds
+
+
+  FROM `fulfillment-dwh-production.pandata_curated.pd_orders` AS po
+    LEFT JOIN `fulfillment-dwh-production.pandata_curated.pd_basket_updates` AS pbu
+      ON po.id = pbu.order_id
+      AND po.global_entity_id = pbu.global_entity_id
+  WHERE po.created_date_utc between start_date and end_date
+    AND po.created_date_local between start_date and end_date
+    AND po.global_entity_id IN ('FP_BD')
+    AND pbu.meta_user_type NOT IN ("VENDOR")
+    AND order_comment LIKE ('%to WALLET.%')
+    AND order_comment LIKE ('%| Partial refund |%')
+
+
+  GROUP BY 1
+),
+
+
+reactive_compensation AS (
+  SELECT 
+    distinct
+    date_trunc(date(created_at_local),week) AS week,
+    SUM(compensation_value_local) AS reactive_compensation_value
+
+
+  FROM `fulfillment-dwh-production.pandata_curated.gcc_compensation_and_refund_events`
+
+
+  WHERE created_date_utc between start_date and end_date
+    AND created_at_local between start_date and end_date
+    AND global_entity_id = "FP_BD"
+    AND event_type IN ("Compensation")
+    AND compensation_category = "Reactive"
+   
+   GROUP BY 1
+),
+
+
+proactive_compensation AS (
+  SELECT 
+    distinct
+    date_trunc(date(created_at_local),week) AS week,
+    SUM(compensation_value_local) AS proactive_compensation_value
+
+
+  FROM `fulfillment-dwh-production.pandata_curated.gcc_compensation_and_refund_events`
+
+
+  WHERE created_date_utc between start_date and end_date
+    AND created_at_local between start_date and end_date
+    AND global_entity_id = "FP_BD"
+    AND event_type IN ("Compensation")
+    AND compensation_category = "Proactive"
+  
+  GROUP BY 1
+),
+
+
+
+
+orders AS (
+  SELECT
+  distinct
+  date_trunc(date(created_date_local),week) AS week,
+  COUNT(DISTINCT code) AS valid_orders,
+  SUM(total_value_local) AS valid_GMV
+
+
+FROM `fulfillment-dwh-production.pandata_curated.pd_orders` po
+
+
+WHERE 
+      created_date_utc between start_date and end_date
+  AND created_at_local between start_date and end_date
+  AND po.global_entity_id = "FP_BD" 
+  AND is_valid_order
+
+
+ GROUP BY 1 
+)
+
+
+Select
+  distinct 
+  refund_vouchers.week,
+  round(refund_vouchers.voucher_refund_value + wallet_refunds.wallet_partial_refunds,2) as total_refund,
+  round(reactive_compensation.reactive_compensation_value + proactive_compensation.proactive_compensation_value,2) as customer_compensation,
+  
+  
+FROM refund_vouchers
+LEFT JOIN orders
+  ON refund_vouchers.week = orders.week 
+LEFT JOIN wallet_refunds
+  ON refund_vouchers.week = wallet_refunds.week
+LEFT JOIN reactive_compensation
+  ON refund_vouchers.week = reactive_compensation.week
+LEFT JOIN proactive_compensation
+  ON refund_vouchers.week = proactive_compensation.week
+
+
+order by 1 asc
+
+
+
+### Calculating countrywide weekly food wastage cost
+
+
+DECLARE
+  start_date DEFAULT '2022-01-01';
+DECLARE
+  end_date DEFAULT '2022-12-31';
+
+SELECT
+  week,
+  IFNULL(Logistics_OD,0) + IFNULL(Customer_live_order_OD,0) + IFNULL(Customer_live_order_VD,0) + IFNULL(Customer_live_order_Pickup,0) + IFNULL(Restaurant_Pickup,0) + IFNULL(Restaurant_OD,0) + IFNULL(Restaurant_VD,0) + IFNULL(Post_delivery_issue_OD,0) + IFNULL(Post_delivery_issue_VD,0) + IFNULL(Post_delivery_issue_Pickup,0) + IFNULL(Incomplete_order,0) AS total_wastage
+
+FROM (
+
+  SELECT
+    DATE_TRUNC(DATE(ordered_at_local),week) AS week,
+    SUM(CASE
+        WHEN status_code = 631 AND expedition_type = 'delivery' AND is_own_delivery = TRUE AND decline_reason_title IN ('No rider available', 'Outside of delivery area', 'Outside service hours', 'Rider accident', 'Rider unreachable', 'Technical issue', 'Weather problem', 'Rider card reader not available', 'Unsafe delivery area', 'Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Logistics_OD,
+    SUM(CASE
+        WHEN status_code = 64 AND expedition_type = 'delivery' AND is_own_delivery = TRUE AND decline_reason_title IN ('Order is late, customer does not want to wait', 'Customer never received the order', 'Customer refuses to pay or accept the order', 'Customer refuses/is unable to pay for the order', 'Courier or vendor were unprofessional', 'Customer unknown reason', 'Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Customer_live_order_OD,
+    SUM(CASE
+        WHEN status_code = 64 AND expedition_type = 'delivery' AND is_own_delivery = FALSE AND decline_reason_title IN ('Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Customer_live_order_VD,
+    SUM(CASE
+        WHEN status_code = 64 AND expedition_type = 'pickup' AND is_own_delivery = TRUE AND decline_reason_title IN ('Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Customer_live_order_Pickup,
+    SUM(CASE
+        WHEN status_code = 63 AND expedition_type = 'pickup' AND is_own_delivery = TRUE AND decline_reason_title IN ('Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Restaurant_Pickup,
+    SUM(CASE
+        WHEN status_code = 63 AND expedition_type = 'delivery' AND is_own_delivery = TRUE AND decline_reason_title IN ('Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Restaurant_OD,
+    SUM(CASE
+        WHEN status_code = 63 AND expedition_type = 'delivery' AND is_own_delivery = FALSE AND decline_reason_title IN ('Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Restaurant_VD,
+    SUM(CASE
+        WHEN status_code = 68 AND expedition_type = 'delivery' AND is_own_delivery = TRUE AND decline_reason_title IN ('Customer received food totally spilled', 'Customer received order too late (>1h)', 'Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Post_delivery_issue_OD,
+    SUM(CASE
+        WHEN status_code = 68 AND expedition_type = 'delivery' AND is_own_delivery = FALSE AND decline_reason_title IN ('Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Post_delivery_issue_VD,
+    SUM(CASE
+        WHEN status_code = 68 AND expedition_type = 'pickup' AND is_own_delivery = TRUE AND decline_reason_title IN ('Other') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Post_delivery_issue_Pickup,
+    SUM(CASE
+        WHEN status_code = 68 AND decline_reason_title IN ('Online payment problem') THEN gfv_gross_local
+      ELSE
+      NULL
+    END
+      ) AS Incomplete_order
+  FROM
+    `fulfillment-dwh-production.pandata_report.country_BD_bd_analytics`
+  WHERE
+    ordered_at_local BETWEEN start_date AND end_date
+    AND is_billable = TRUE
+  GROUP BY
+    1
+  ORDER BY
+    1 )
+
+
+order by 
+  week asc
+
+
+
