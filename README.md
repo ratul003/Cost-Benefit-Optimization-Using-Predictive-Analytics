@@ -25,9 +25,9 @@
 
 ## How?
   - Relative changes in Operational KPIs with an increase in stacking %
-  - Covariance Test → measure the direction of the relationship between stacking & Ops metrics
-  - Pearson Correlation Test → measure the strength of the relationship between the stacking & Ops metrics
-  - Multi-Linear Regression Prediction Modeling → measure the impact of an X% increase in stacking levels on Top Line metrics
+  - Covariance Test → measure the direction of the relationship between stacking % & Ops metrics
+  - Pearson Correlation Test → measure the strength of the relationship between the stacking % & Ops metrics
+  - Multi-Linear Regression Prediction Modeling → measure the impact of an X % increase in stacking levels on Top Line metrics
 
 Slides construct ranked in ORDER →
 
@@ -37,23 +37,23 @@ Slides construct ranked in ORDER →
 4. PRE and WORST Performance metrics VISUALS during the stacking experiment for cost reduction
 
 Metrics include → 
-  ##### Cost :- Delivery Time, Delayed Orders%, Customer Contact Rate, Compensation Cost Per Order, Refund Cost Per Order, Seamless Orders%
+  ##### Cost :- Delivery Time, Delayed Orders %, Customer Contact Rate, Compensation Cost Per Order, Refund Cost Per Order, Seamless Orders %
   ##### Benefits :- Rider CPO, Rider Efficiancy Rate
 
 5. Overview of the Correlation Test, Confidence Interval Test & Model Predictions 
-- Stacking VS DT → Correlation Matrix, Regression Output, Graph 
+- Stacking % VS DT → Correlation Matrix, Regression Output, Graph 
 
 
 6. Overview of the Pearson Correlation Test, Confidence Interval Test & Model Predictions 
-- Stacking VS Compensation CPO →  Correlation Matrix, Regression Output, Graph
+- Stacking % VS Compensation CPO →  Correlation Matrix, Regression Output, Graph
 
 
 7. Overview of the Correlation Test, Confidence Interval Test & Model Predictions 
-- Stacking VS Refund CPO → Correlation Matrix, Regression Output, Graph
+- Stacking % VS Refund CPO → Correlation Matrix, Regression Output, Graph
 
 
 8. Overview of the Correlation Test, Confidence Interval Test & Model Predictions 
-- Stacking vs Rider CPO → Correlation Matrix, Regression Output, Graph
+- Stacking % vs Rider CPO → Correlation Matrix, Regression Output, Graph
 
 
 9. Summary of the Analysis
