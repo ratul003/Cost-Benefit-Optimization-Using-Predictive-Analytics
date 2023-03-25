@@ -1,11 +1,11 @@
 # Determining the optimal stacking level in Bangladesh using Cost Benefit Analysis
  
- - This project was done as part of an initiative to drive profitability and maintain a healthy customer experience at an optimal cost efficiency for the largest food delivery business Foodpanda | Delivery Hero in Bangladesh.
+ - This project was done as part of an initiative to drive Top Line profitability and maintain a healthy customer experience at an optimal cost efficiency for the largest food delivery platform Foodpanda | Delivery Hero in Bangladesh.
  
 #### Breakdown: The project is divided into 3 stages -->
- - Data ETL (Check SQL Query Doc)
+ - Data Extract/Transform/Load (Check SQL Query Doc)
  - Statistical Data Modeling (Check R HTML/RMD Doc)
- - Stakeholder Management and Driving the Proposal (Check Google Slides)
+ - Project Management and Execution (Check Google Slides)
 
 ## What? 
 ### Determining the optimal “ML Algo Order Assignment” stacking levels using Cost-Benefit Analysis
@@ -25,8 +25,8 @@
 
 ## How?
   - Relative changes in Operational KPIs with an increase in stacking %
-  - Covariance Test → measure the direction of the relationship between stacking % & Ops metrics
-  - Pearson Correlation Test → measure the strength of the relationship between the stacking % & Ops metrics
+  - Covariance Test → measure the direction of the relationship between stacking % & operations metrics
+  - Pearson Correlation Test → measure the strength of the relationship between the stacking % & operations metrics
   - Multi-Linear Regression Prediction Modeling → measure the impact of an X % increase in stacking levels on Top Line metrics
 
 Slides construct ranked in ORDER →
@@ -41,19 +41,19 @@ Metrics include →
   ##### Benefits :- Rider CPO, Rider Efficiancy Rate
 
 5. Overview of the Correlation Test, Confidence Interval Test & Model Predictions 
-- Stacking % VS DT → Correlation Matrix, Regression Output, Graph 
+- Stacking % VS Delivery Time → Correlation Matrix, Regression Output, Graph 
 
 
 6. Overview of the Pearson Correlation Test, Confidence Interval Test & Model Predictions 
-- Stacking % VS Compensation CPO →  Correlation Matrix, Regression Output, Graph
+- Stacking % VS Compensation Cost Per Order →  Correlation Matrix, Regression Output, Graph
 
 
 7. Overview of the Correlation Test, Confidence Interval Test & Model Predictions 
-- Stacking % VS Refund CPO → Correlation Matrix, Regression Output, Graph
+- Stacking % VS Refund Cost Per Order → Correlation Matrix, Regression Output, Graph
 
 
 8. Overview of the Correlation Test, Confidence Interval Test & Model Predictions 
-- Stacking % vs Rider CPO → Correlation Matrix, Regression Output, Graph
+- Stacking % vs Rider Cost Per Order → Correlation Matrix, Regression Output, Graph
 
 
 9. Summary of the Analysis
