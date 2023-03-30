@@ -8,7 +8,7 @@
  - Project Management and Execution (Check Google Slides)
 
 ## What? 
-### Determining the optimal “ML Algo Order Assignment” stacking levels using Cost-Benefit Analysis
+### Determining the optimal “ML Algorithmic Order Assignment” stacking levels using Cost-Benefit Analysis
 
 ## Why?
 #### Drive Benefits → 
