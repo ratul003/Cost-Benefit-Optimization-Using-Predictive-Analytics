@@ -15,7 +15,7 @@
   - Improve Fully Loaded Gross Profit Per Order
   - Improve Customer Experience 
   - Customer Reorder Rates
-  - Customer Incident Rates (Extreme Delay, Late Orders etc)
+  - Customer Incident Rates (Extreme Delay, Late Orders%)
   - Seamless Orders on Time 
 
 #### Lower Costs →
